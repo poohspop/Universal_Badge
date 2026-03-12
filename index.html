@@ -1,0 +1,381 @@
+<!-- 
+  TEMPLATE COLOR KEY: HEX #00b140 / RGB 0, 177, 64 
+  Ensure your backend template uses this specific green for the photo cutout area.
+-->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Event Badge Generator</title>
+    <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+    <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
+        body { font-family: 'Inter', sans-serif; background-color: #f8fafc; }
+        .canvas-bg {
+            background-image:
+                linear-gradient(45deg, #e2e8f0 25%, transparent 25%),
+                linear-gradient(-45deg, #e2e8f0 25%, transparent 25%),
+                linear-gradient(45deg, transparent 75%, #e2e8f0 75%),
+                linear-gradient(-45deg, transparent 75%, #e2e8f0 75%);
+            background-size: 20px 20px;
+            background-position: 0 0, 0 10px, 10px -10px, -10px 0px;
+        }
+        input[type=range] {
+            -webkit-appearance: none;
+            width: 100%;
+            background: transparent;
+        }
+        input[type=range]::-webkit-slider-thumb {
+            -webkit-appearance: none;
+            height: 18px;
+            width: 18px;
+            border-radius: 50%;
+            background: #0f766e;
+            cursor: pointer;
+            margin-top: -7px;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.3);
+        }
+        input[type=range]::-webkit-slider-runnable-track {
+            width: 100%;
+            height: 4px;
+            cursor: pointer;
+            background: #cbd5e1;
+            border-radius: 2px;
+        }
+    </style>
+</head>
+<body>
+    <div id="root"></div>
+
+    <script type="text/babel">
+        const { useState, useEffect, useRef, useCallback } = React;
+
+        const IconUpload = () => <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect width="18" height="18" x="3" y="3" rx="2" ry="2"/><circle cx="9" cy="9" r="2"/><path d="m21 15-3.086-3.086a2 2 0 0 0-2.828 0L6 21"/></svg>;
+        const IconDownload = () => <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" x2="12" y1="15" y2="3"/></svg>;
+        const IconZoom = () => <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" x2="16.65" y1="21" y2="16.65"/><line x1="11" x2="11" y1="8" y2="14"/><line x1="8" x2="14" y1="11" y2="11"/></svg>;
+        const IconRotate = () => <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 12a9 9 0 1 1-9-9c2.52 0 4.93 1 6.74 2.74L21 8"/><path d="M21 3v5h-5"/></svg>;
+        const IconMove = () => <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="5 9 2 12 5 15"/><polyline points="9 5 12 2 15 5"/><polyline points="19 9 22 12 19 15"/><polyline points="15 19 12 22 9 19"/><line x1="2" x2="22" y1="12" y2="12"/><line x1="12" x2="12" y1="2" y2="22"/></svg>;
+        const IconAlert = () => <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" x2="12" y1="8" y2="12"/><line x1="12" x2="12.01" y1="16" y2="16"/></svg>;
+
+        const App = () => {
+            // Configuration
+            const BACKEND_TEMPLATE_URL = "template.png"; 
+            const CHROMA_KEY = { r: 0, g: 177, b: 64 };
+            const THRESHOLD = 65; 
+
+            // State
+            const [processedTemplate, setProcessedTemplate] = useState(null);
+            const [userImg, setUserImg] = useState(null);
+            const [isLoading, setIsLoading] = useState(true);
+            const [error, setError] = useState(null);
+            const [canvasDim, setCanvasDim] = useState({ width: 1080, height: 1080 });
+            const [transform, setTransform] = useState({ x: 540, y: 540, scale: 1, rotation: 0 });
+            
+            const canvasRef = useRef(null);
+            const userInputRef = useRef(null);
+            const templateInputRef = useRef(null);
+            const isDragging = useRef(false);
+            const lastPos = useRef({ x: 0, y: 0 });
+
+            // Initialize Template from Backend
+            const loadTemplate = useCallback((url) => {
+                setIsLoading(true);
+                setError(null);
+                const img = new Image();
+                img.crossOrigin = "Anonymous";
+                
+                img.onload = () => {
+                    setCanvasDim({ width: img.width, height: img.height });
+                    setTransform(p => ({ ...p, x: img.width / 2, y: img.height / 2 }));
+                    processTemplate(img);
+                };
+                
+                img.onerror = () => {
+                    setError("Failed to load template image. Please ensure 'template.png' exists in the app folder.");
+                    setIsLoading(false);
+                };
+
+                img.src = url + '?t=' + new Date().getTime(); // Cache busting
+            }, []);
+
+            useEffect(() => {
+                loadTemplate(BACKEND_TEMPLATE_URL);
+            }, [loadTemplate]);
+
+            const processTemplate = (img) => {
+                try {
+                    const tempCanvas = document.createElement('canvas');
+                    tempCanvas.width = img.width;
+                    tempCanvas.height = img.height;
+                    const ctx = tempCanvas.getContext('2d');
+                    ctx.drawImage(img, 0, 0);
+
+                    const imageData = ctx.getImageData(0, 0, img.width, img.height);
+                    const data = imageData.data;
+
+                    for (let i = 0; i < data.length; i += 4) {
+                        const r = data[i];
+                        const g = data[i + 1];
+                        const b = data[i + 2];
+                        const distance = Math.sqrt(
+                            Math.pow(r - CHROMA_KEY.r, 2) +
+                            Math.pow(g - CHROMA_KEY.g, 2) +
+                            Math.pow(b - CHROMA_KEY.b, 2)
+                        );
+                        if (distance < THRESHOLD) data[i + 3] = 0;
+                    }
+
+                    ctx.putImageData(imageData, 0, 0);
+                    const result = new Image();
+                    result.onload = () => {
+                        setProcessedTemplate(result);
+                        setIsLoading(false);
+                    };
+                    result.src = tempCanvas.toDataURL();
+                } catch (e) {
+                    setError("Could not process template transparency. This usually happens with local files due to browser security.");
+                    setIsLoading(false);
+                }
+            };
+
+            const handleUserUpload = (e) => {
+                const file = e.target.files[0];
+                if (!file) return;
+                const reader = new FileReader();
+                reader.onload = (evt) => {
+                    const img = new Image();
+                    img.onload = () => {
+                        setUserImg(img);
+                        const initialScale = Math.max(canvasDim.width / img.width, canvasDim.height / img.height) * 0.5;
+                        setTransform(p => ({ ...p, scale: initialScale }));
+                    };
+                    img.src = evt.target.result;
+                };
+                reader.readAsDataURL(file);
+            };
+
+            const handleTemplateFallback = (e) => {
+                const file = e.target.files[0];
+                if (!file) return;
+                const reader = new FileReader();
+                reader.onload = (evt) => {
+                    loadTemplate(evt.target.result);
+                };
+                reader.readAsDataURL(file);
+            };
+
+            const handleDownload = async () => {
+                if (!canvasRef.current) return;
+                const dataUrl = canvasRef.current.toDataURL('image/png');
+
+                if (navigator.share && navigator.canShare) {
+                    try {
+                        const blob = await (await fetch(dataUrl)).blob();
+                        const file = new File([blob], 'my-badge.png', { type: 'image/png' });
+                        if (navigator.canShare({ files: [file] })) {
+                            await navigator.share({ files: [file], title: 'My Event Badge' });
+                            return;
+                        }
+                    } catch (err) {
+                        console.error("Share failed", err);
+                    }
+                }
+
+                const link = document.createElement('a');
+                link.download = 'my-badge.png';
+                link.href = dataUrl;
+                link.click();
+            };
+
+            const draw = useCallback(() => {
+                const canvas = canvasRef.current;
+                if (!canvas) return;
+                const ctx = canvas.getContext('2d');
+
+                ctx.clearRect(0, 0, canvas.width, canvas.height);
+                ctx.fillStyle = "#ffffff";
+                ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+                if (userImg) {
+                    ctx.save();
+                    ctx.translate(transform.x, transform.y);
+                    ctx.rotate((transform.rotation * Math.PI) / 180);
+                    ctx.scale(transform.scale, transform.scale);
+                    ctx.drawImage(userImg, -userImg.width / 2, -userImg.height / 2);
+                    ctx.restore();
+                }
+
+                if (processedTemplate) {
+                    ctx.drawImage(processedTemplate, 0, 0);
+                }
+            }, [userImg, processedTemplate, transform]);
+
+            useEffect(() => {
+                requestAnimationFrame(draw);
+            }, [draw]);
+
+            // Drag Controls
+            const getCoords = (e) => {
+                const rect = canvasRef.current.getBoundingClientRect();
+                const scaleX = canvasRef.current.width / rect.width;
+                const scaleY = canvasRef.current.height / rect.height;
+                const clientX = e.clientX || (e.touches ? e.touches[0].clientX : 0);
+                const clientY = e.clientY || (e.touches ? e.touches[0].clientY : 0);
+                return { x: clientX * scaleX, y: clientY * scaleY };
+            };
+
+            const startDrag = (e) => {
+                if (!userImg) return;
+                isDragging.current = true;
+                lastPos.current = getCoords(e);
+            };
+
+            const doDrag = (e) => {
+                if (!isDragging.current) return;
+                e.preventDefault();
+                const current = getCoords(e);
+                const dx = current.x - lastPos.current.x;
+                const dy = current.y - lastPos.current.y;
+                setTransform(p => ({ ...p, x: p.x + dx, y: p.y + dy }));
+                lastPos.current = current;
+            };
+
+            const stopDrag = () => { isDragging.current = false; };
+
+            return (
+                <div className="min-h-screen flex flex-col items-center py-6 px-4 max-w-6xl mx-auto">
+                    <header className="mb-6 text-center">
+                        <h1 className="text-3xl font-bold text-teal-900 mb-1">Badge Generator</h1>
+                        <p className="text-slate-500 text-sm">Create your custom event graphic in seconds.</p>
+                    </header>
+
+                    <main className="w-full grid grid-cols-1 lg:grid-cols-12 gap-6 bg-white p-5 rounded-3xl shadow-xl border border-slate-100">
+                        
+                        {/* Control Panel */}
+                        <div className="lg:col-span-4 flex flex-col gap-5 order-2 lg:order-1">
+                            
+                            {error && (
+                                <div className="bg-red-50 border border-red-100 rounded-2xl p-4">
+                                    <div className="flex items-center gap-2 text-red-600 font-bold text-xs mb-2">
+                                        <IconAlert /> ERROR
+                                    </div>
+                                    <p className="text-[11px] text-red-500 mb-3 leading-relaxed">{error}</p>
+                                    <button 
+                                        onClick={() => templateInputRef.current.click()}
+                                        className="w-full py-2 bg-white border border-red-200 text-red-600 text-[10px] font-bold rounded-lg hover:bg-red-50 transition-colors uppercase tracking-wider"
+                                    >
+                                        Upload template.png Manually
+                                    </button>
+                                    <input type="file" className="hidden" ref={templateInputRef} onChange={handleTemplateFallback} accept="image/*" />
+                                </div>
+                            )}
+
+                            <div className={`bg-slate-50 border border-slate-200 rounded-2xl p-5 transition-opacity ${isLoading && 'opacity-50 pointer-events-none'}`}>
+                                <h2 className="text-slate-800 font-bold flex items-center gap-2 mb-4 text-sm uppercase tracking-wider">
+                                    <span className="bg-teal-700 text-white w-5 h-5 rounded-full flex items-center justify-center text-[10px]">1</span>
+                                    Upload Photo
+                                </h2>
+                                <button 
+                                    onClick={() => userInputRef.current.click()}
+                                    className="w-full py-4 bg-white border-2 border-dashed border-slate-300 text-slate-600 font-semibold rounded-xl hover:border-teal-500 hover:text-teal-700 transition-all flex flex-col items-center gap-2 shadow-sm"
+                                >
+                                    <IconUpload />
+                                    <span>{userImg ? "Replace Photo" : "Select Headshot"}</span>
+                                </button>
+                                <input type="file" className="hidden" ref={userInputRef} onChange={handleUserUpload} accept="image/*" />
+                            </div>
+
+                            <div className={`bg-white border border-slate-200 rounded-2xl p-5 transition-all ${!userImg && 'opacity-40 pointer-events-none'}`}>
+                                <h2 className="text-slate-800 font-bold flex items-center gap-2 mb-5 text-sm uppercase tracking-wider">
+                                    <span className="bg-teal-700 text-white w-5 h-5 rounded-full flex items-center justify-center text-[10px]">2</span>
+                                    Adjust Fit
+                                </h2>
+
+                                <div className="space-y-6">
+                                    <div className="space-y-3">
+                                        <div className="flex justify-between text-xs font-bold text-slate-400">
+                                            <span className="flex items-center gap-1"><IconZoom /> ZOOM</span>
+                                            <span>{Math.round(transform.scale * 100)}%</span>
+                                        </div>
+                                        <input type="range" min="0.05" max="3" step="0.01" value={transform.scale} onChange={(e) => setTransform(p => ({...p, scale: parseFloat(e.target.value)}))} />
+                                    </div>
+
+                                    <div className="space-y-3">
+                                        <div className="flex justify-between text-xs font-bold text-slate-400">
+                                            <span className="flex items-center gap-1"><IconRotate /> ROTATE</span>
+                                            <span>{Math.round(transform.rotation)}°</span>
+                                        </div>
+                                        <input type="range" min="-180" max="180" step="1" value={transform.rotation} onChange={(e) => setTransform(p => ({...p, rotation: parseFloat(e.target.value)}))} />
+                                    </div>
+                                    
+                                    <p className="text-[10px] text-slate-400 text-center flex items-center justify-center gap-1">
+                                        <IconMove /> TIP: DRAG THE IMAGE TO POSITION IT
+                                    </p>
+                                </div>
+                            </div>
+
+                            <button
+                                onClick={handleDownload}
+                                disabled={!userImg || isLoading || !!error}
+                                className={`w-full py-5 rounded-2xl font-black text-lg flex items-center justify-center gap-3 shadow-lg transition-all active:scale-95 ${(!userImg || isLoading || !!error) ? 'bg-slate-200 text-slate-400' : 'bg-teal-700 text-white hover:bg-teal-800 shadow-teal-100'}`}
+                            >
+                                <IconDownload /> DOWNLOAD BADGE
+                            </button>
+                        </div>
+
+                        {/* Preview Area */}
+                        <div className="lg:col-span-8 order-1 lg:order-2 bg-slate-100 rounded-2xl flex items-center justify-center p-3 md:p-6 min-h-[400px] relative overflow-hidden">
+                            {isLoading && (
+                                <div className="absolute inset-0 z-30 flex flex-col items-center justify-center bg-white/90 backdrop-blur-md">
+                                    <div className="w-12 h-12 border-4 border-teal-100 border-t-teal-700 rounded-full animate-spin mb-4"></div>
+                                    <p className="text-teal-900 font-bold">LOADING ASSETS...</p>
+                                </div>
+                            )}
+
+                            {!userImg && !isLoading && !error && (
+                                <div className="absolute inset-0 z-10 flex flex-col items-center justify-center pointer-events-none">
+                                    <div className="bg-white/50 p-6 rounded-full mb-4">
+                                        <IconUpload />
+                                    </div>
+                                    <p className="text-slate-400 font-bold uppercase tracking-widest text-xs">Awaiting Photo Upload</p>
+                                </div>
+                            )}
+
+                            {error && !isLoading && (
+                                <div className="absolute inset-0 z-10 flex flex-col items-center justify-center px-10 text-center">
+                                    <p className="text-slate-400 font-bold uppercase tracking-widest text-[10px] mb-2">Template Unavailable</p>
+                                    <p className="text-slate-300 text-[10px]">The canvas requires a template to function.</p>
+                                </div>
+                            )}
+
+                            <div className="shadow-2xl rounded-lg overflow-hidden canvas-bg border-4 border-white bg-white w-full max-w-[600px]">
+                                <canvas
+                                    ref={canvasRef}
+                                    width={canvasDim.width}
+                                    height={canvasDim.height}
+                                    className={`w-full h-auto object-contain touch-none ${userImg ? 'cursor-move' : 'cursor-default'}`}
+                                    onMouseDown={startDrag}
+                                    onTouchStart={startDrag}
+                                    onMouseMove={doDrag}
+                                    onTouchMove={doDrag}
+                                    onMouseUp={stopDrag}
+                                    onMouseLeave={stopDrag}
+                                    onTouchEnd={stopDrag}
+                                />
+                            </div>
+                        </div>
+
+                    </main>
+                </div>
+            );
+        };
+
+        const root = ReactDOM.createRoot(document.getElementById('root'));
+        root.render(<App />);
+    </script>
+</body>
+</html>
