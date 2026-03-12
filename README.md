@@ -82,3 +82,6 @@ The application expects these exact file names.
 | Photo not visible | Confirm the template uses the exact RGB values listed above. |
 | Performance lag | Reduce template dimensions if the browser experiences slowness. |
 | Loading errors | Check Cross-Origin Resource Sharing (CORS) settings if assets reside on a different domain. |
+
+## Copyright & Licensing
+ © 2026 by Andrew Crim | andrew.crim@gmail.com
